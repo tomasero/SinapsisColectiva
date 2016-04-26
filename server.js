@@ -1,8 +1,8 @@
-
 var http = require('http'),
     twit = require('twit'),
     client = require('twilio')("ACf3e2774672baa3f68d9b80591c6667df", "1b9d6ce872a880a96e6c4293c52606fc"),
-    express = require('express');
+    express = require('express'),
+    utf8 = require('utf8');
 
 var readline = require('readline');
 var rl = readline.createInterface({
@@ -22,10 +22,22 @@ var T = new twit({
     access_token_secret: process.env.TWITTER_ACCESS_TOKEN_SECRET
 });
 
-function publish(message) {
+var sinapsisNumber = "+18556190666";
+
+function publish(message, callback) {
     console.log(message);
     T.post('statuses/update', { status: message },  function(error, tweet, response) {
-        if(error) throw error;
+        if (error) {
+            console.log("error.statusCode: " + error.statusCode);
+            if (error.statusCode == 403) {
+                console.log("DUPDUPDUP");
+                callback("duplicate"); 
+            } else {
+                throw error;
+            }
+        } else {
+            callback(false);
+        }
     });
 }
 
@@ -37,38 +49,44 @@ function isPhoneNumber(element) {
     return element.match(/\d/g).length===10;
 }
 
-function sendMessage(from, msg) {
+function sendSMS(from, to,  msg) {
+    client.messages.create({ 
+        to: to, 
+        from: from, 
+        body: msg 
+    }, function(err, message) { 
+        if (err) console.log(err);
+    });
+
+}
+
+function sendMessage(from, msg, res) {
     var words = msg.split(" ");
     var to;
     if (isPhoneNumber(words[0]) == -1) {
         console.log("incorrecto");
         to = from;
         msg = "Wrong number format, please send just the 10 numbers";
+        sendSMS(sinapsisNumber, to, msg);
     } else {
         to = "+1" + words[0];
         msg = words.splice(1, words.length).join(" ");
-        publish(msg);
-    }
-    console.log("to: " + to);
-    console.log("msg: " + msg);
-    client.messages.create({ 
-        to: to, 
-        from: "+18556190666", 
-        body: msg 
-    }, function(err, message) { 
-        if (err) console.log(err);
-    });
-    if (to == from) return;
-    var response = 'Enviame la continuacion de la historia, incluyendo en el mensaje el numero de tu amigo que va a continuar la historia. No te olvides de agregar el hashtag!';
-    setTimeout(function () {
-        client.messages.create({ 
-            to: to, 
-            from: "+18556190666", 
-            body: response 
-        }, function(err, message) { 
-            if (err) console.log(err);
+        publish(msg, function (error) {
+            if (error == "duplicate") {
+                to = from;
+                msg = "No mandes duplicados!!";
+                sendSMS(sinapsisNumber, to, msg);
+            } else {
+                var response = '<Response><Message>Gracias por contribuir al cadaver exquisito!</Message></Response>';
+                res.send(response);
+                sendSMS(sinapsisNumber, to, msg);
+                msg = 'Enviame la continuacion de la historia en el siguiente formato: [Numero de telefono  (solo 10 dígitos)] [#hashtag] [Continuacion de la historia]';
+                setTimeout(function () {
+                    sendSMS(sinapsisNumber, to, msg);                
+                }, 500);
+            }
         });
-    }, 5000);
+    }
 }
 
 var app = express(),
@@ -79,15 +97,19 @@ app.use(bodyParser.urlencoded({
   extended: true
 }));
 
+/**
+app.use(function(req, res, next) {
+    req.setEncoding('utf8');
+});
+*/
 app.post('/incoming', function(req, res) {
+    //req.setEncoding('utf8');
     var data = req.body,
         from = data.From,
         msg = data.Body;
     console.log("from: " + from);
     console.log("msg: " + msg);
-    var response = '<Response><Message>Gracias por contribuir al cadaver exquisito!</Message></Response>';
-    sendMessage(from, msg);
-    res.send(response);
+    sendMessage(from, msg, res);
 });
 
 var port = Number(process.env.PORT || 5000);
