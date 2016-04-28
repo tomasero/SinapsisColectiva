@@ -2,7 +2,9 @@ var http = require('http'),
     twit = require('twit'),
     client = require('twilio')("ACf3e2774672baa3f68d9b80591c6667df", "1b9d6ce872a880a96e6c4293c52606fc"),
     express = require('express'),
-    utf8 = require('utf8');
+    utf8 = require('utf8'),
+    querystring = require('querystring'),
+    unidecode = require('unidecode');
 
 var readline = require('readline');
 var rl = readline.createInterface({
@@ -25,13 +27,14 @@ var T = new twit({
 var sinapsisNumber = "+18556190666";
 
 function publish(message, callback) {
-    console.log(message);
     T.post('statuses/update', { status: message },  function(error, tweet, response) {
         if (error) {
+            console.log("error: " + error);
             console.log("error.statusCode: " + error.statusCode);
             if (error.statusCode == 403) {
-                console.log("DUPDUPDUP");
-                callback("duplicate"); 
+                if (error.message == "Status is a duplicate.") {
+                    callback("duplicate"); 
+                }
             } else {
                 throw error;
             }
@@ -46,7 +49,11 @@ rl.on('line', function(line) {
 });
 
 function isPhoneNumber(element) {
-    return element.match(/\d/g).length===10;
+    try {
+        return element.match(/\d/g).length===10;
+    } catch (err) {
+        return -2;
+    }
 }
 
 function sendSMS(from, to,  msg) {
@@ -63,14 +70,22 @@ function sendSMS(from, to,  msg) {
 function sendMessage(from, msg, res) {
     var words = msg.split(" ");
     var to;
-    if (isPhoneNumber(words[0]) == -1) {
-        console.log("incorrecto");
-        to = from;
-        msg = "Wrong number format, please send just the 10 numbers";
-        sendSMS(sinapsisNumber, to, msg);
+    var errTo = from;
+    isPhoneCorrect = isPhoneNumber(words[0]);
+    if (isPhoneCorrect == -1) {
+        msg = "Formato de número incorrecto, solo manda 10 números";
+        sendSMS(sinapsisNumber, errTo, msg);
+    } else if (isPhoneCorrect == -2) {
+        msg = "Asegúrate de incluir un número primero";
+        sendSMS(sinapsisNumber, errTo, msg);
     } else {
         to = "+1" + words[0];
         msg = words.splice(1, words.length).join(" ");
+        if (msg.length > 140) {
+            msg = msg.substring(0, 140);
+            errMsg = "Tu mensaje ha sido recortado a 140 caracteres!!";
+            sendSMS(sinapsisNumber, errTo, errMsg);
+        }
         publish(msg, function (error) {
             if (error == "duplicate") {
                 to = from;
@@ -80,7 +95,7 @@ function sendMessage(from, msg, res) {
                 var response = '<Response><Message>Gracias por contribuir al cadaver exquisito!</Message></Response>';
                 res.send(response);
                 sendSMS(sinapsisNumber, to, msg);
-                msg = 'Enviame la continuacion de la historia en el siguiente formato: [Numero de telefono  (solo 10 dígitos)] [#hashtag] [Continuacion de la historia]';
+                msg = 'Envíame la continuacion de la historia en el siguiente formato: [Numero de telefono  (solo 10 dígitos)] #hashtag [Continuación de la historia]';
                 setTimeout(function () {
                     sendSMS(sinapsisNumber, to, msg);                
                 }, 500);
@@ -108,7 +123,8 @@ app.post('/incoming', function(req, res) {
         from = data.From,
         msg = data.Body;
     console.log("from: " + from);
-    console.log("msg: " + msg);
+    console.log("msg: " + utf8.decode(msg));
+    console.log(unidecode(msg));
     sendMessage(from, msg, res);
 });
 
